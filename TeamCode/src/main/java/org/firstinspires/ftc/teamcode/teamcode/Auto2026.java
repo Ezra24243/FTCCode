@@ -1,0 +1,285 @@
+package org.firstinspires.ftc.teamcode;
+
+import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
+import com.qualcomm.robotcore.eventloop.opmode.LinearOpMode;
+import com.qualcomm.robotcore.eventloop.opmode.Autonomous;
+import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DcMotorSimple;
+import com.qualcomm.robotcore.hardware.IMU;
+
+
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
+import org.firstinspires.ftc.robotcore.external.navigation.YawPitchRollAngles;
+
+
+@Autonomous(name="Auto2026", group="Test")
+public class Auto2026 extends LinearOpMode {
+
+    private DcMotor fLeft, fRight, bLeft, bRight;
+    private DcMotor intake;
+    private IMU imu;
+
+    private static final double WHEEL_DIAMETER_CM = 10; // adjust
+    private static final double TICKS_PER_REV = 537.7;
+    private static final double GEAR_RATIO = 1;
+
+    // Proportional constants
+    private static final double kP_drive = 0.02; // tune for smooth driving
+    private static final double kP_turn  = 0.05; // tune for smooth turning
+    private static final double intakeSpeed = 1;
+
+    private double cmToTicks(double cm) {
+        return (cm / (Math.PI * WHEEL_DIAMETER_CM * GEAR_RATIO)) * TICKS_PER_REV;
+    }
+
+    private void setAllMotors(double power) {
+        fLeft.setPower(power);
+        fRight.setPower(power);
+        bLeft.setPower(power);
+        bRight.setPower(power);
+    }
+//MEASUREMENTS
+    double targetDistanceCM = 50; // replace with measured distance from previous test
+    double targetHeadingDeg  = 45; // replace with measured heading from previous test
+    double returnHeadingDeg = 0;
+    double targetTicks = cmToTicks(targetDistanceCM);
+    double secondTargetDistanceCM = 67; // replace with measured distance from previous test
+    double secondTargetTicks = cmToTicks(secondTargetDistanceCM);
+    double backDistanceCM = 50; // replace with measured distance from previous test
+    double backTargetTicks = cmToTicks(backDistanceCM);
+
+    @Override
+    public void runOpMode() {
+
+
+//OUR THINGS
+        fLeft  = hardwareMap.get(DcMotor.class, "fLeft");
+        fRight = hardwareMap.get(DcMotor.class, "fRight");
+        bLeft   = hardwareMap.get(DcMotor.class, "bLeft");
+        bRight  = hardwareMap.get(DcMotor.class, "bRight");
+        intake = hardwareMap.get(DcMotor.class, "intake");
+
+        fRight.setDirection(DcMotorSimple.Direction.REVERSE);
+        bRight.setDirection(DcMotorSimple.Direction.REVERSE);
+
+        for (DcMotor m : new DcMotor[]{fLeft, fRight, bLeft, bRight}) {
+            m.setMode(DcMotor.RunMode.STOP_AND_RESET_ENCODER);
+            m.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        }
+
+        imu = hardwareMap.get(IMU.class, "imu");
+        //Initialize IMU
+        imu.initialize(
+                new IMU.Parameters(
+                        new RevHubOrientationOnRobot(
+                                RevHubOrientationOnRobot.LogoFacingDirection.UP,
+                                RevHubOrientationOnRobot.UsbFacingDirection.FORWARD
+                        )
+                )
+        );
+
+
+
+        telemetry.addLine("Peanut or Done");
+        telemetry.update();
+        waitForStart();
+
+
+//DRIVE FORWARD
+
+        boolean driving = true;
+        boolean drivingDone = false;
+
+
+
+        while (opModeIsActive() && driving) {
+            double avgTicks = (fLeft.getCurrentPosition() + fRight.getCurrentPosition()
+                    + bLeft.getCurrentPosition() + bRight.getCurrentPosition()) / 4.0;
+
+            double error = targetTicks - avgTicks;
+            double power = kP_drive * error;
+
+            // Clamp power to avoid too fast
+            power = Math.max(Math.min(power, 0.6), -0.6);
+
+            // Set motors
+            fLeft.setPower(power);
+            fRight.setPower(power);
+            bLeft.setPower(power);
+            bRight.setPower(power);
+
+            telemetry.addData("Driving Error (ticks)", error);
+            telemetry.addData("Motor Power", power);
+            telemetry.update();
+
+            if (Math.abs(error) < 5) { // within ~0.5 cm if TICKS_PER_REV and wheel size match
+                driving = false;
+                drivingDone = true;
+            }
+        } //driving
+
+        setAllMotors(0);
+        sleep(500);
+//TURN TOWARDS GOAL
+
+
+        boolean turning = true;
+        boolean turningDone = false;
+
+
+        while (opModeIsActive() && turning) {
+
+            YawPitchRollAngles robotOrientation;
+            robotOrientation = imu.getRobotYawPitchRollAngles();
+            double heading = robotOrientation.getYaw(AngleUnit.DEGREES);
+            telemetry.addData("Yaw (Z)", "%.2f Deg. (Heading)", robotOrientation.getYaw(AngleUnit.DEGREES));
+            double error = targetHeadingDeg - heading;
+
+            // Normalize to -180 to +180
+            if (error > 180) error -= 360;
+            if (error < -180) error += 360;
+            double power = kP_turn * error;
+            power = Math.max(Math.min(power, 0.5), -0.5);
+
+            // Turn: left motors forward, right motors backward
+            fLeft.setPower(power);
+            bLeft.setPower(power);
+            fRight.setPower(-power);
+            bRight.setPower(-power);
+
+            telemetry.addData("Turning Error (deg)", error);
+            telemetry.addData("Turn Power", power);
+            telemetry.addData("Current Heading", heading);
+            telemetry.update();
+
+            if (Math.abs(error) < 1) { // within 1 degree
+                turning = false;
+                turning = true;
+            }
+        } //turning
+        // Stop motors
+        setAllMotors(0);
+        telemetry.addLine("Movement complete!");
+        telemetry.update();
+        sleep(500);
+//OPTIONALLY DRIVE FORWARD OF BACKWARD TO ADJUST
+
+
+        boolean optional = true;
+        boolean optionalDone = false;
+
+
+
+        while (opModeIsActive() && optional) {
+
+                double secondAvgTicks = (fLeft.getCurrentPosition() + fRight.getCurrentPosition()
+                        + bLeft.getCurrentPosition() + bRight.getCurrentPosition()) / 4.0;
+
+                double error = secondTargetTicks - secondAvgTicks;
+                double power = kP_drive * error;
+
+                // Clamp power to avoid too fast
+                power = Math.max(Math.min(power, 0.6), -0.6);
+
+                // Set motors
+                fLeft.setPower(power);
+                fRight.setPower(power);
+                bLeft.setPower(power);
+                bRight.setPower(power);
+
+                telemetry.addData("Driving Error (ticks)", error);
+                telemetry.addData("Motor Power", power);
+                telemetry.update();
+
+                if (Math.abs(error) < 5) { // within ~0.5 cm if TICKS_PER_REV and wheel size match
+                    optional = false;
+                    optionalDone = true;
+                }
+
+
+
+        } //Optional
+        setAllMotors(0);
+        sleep(500);
+        boolean shoot = drivingDone && turningDone && optional;
+//Shooting
+
+        if (shoot) {
+            intake.setPower(intakeSpeed);
+            sleep(2000);
+            setAllMotors(0);
+            shoot = false;
+        }
+
+//TURN BACK
+
+        boolean zero = true;
+        while (opModeIsActive() && zero) {
+            YawPitchRollAngles robotOrientation;
+            robotOrientation = imu.getRobotYawPitchRollAngles();
+            double heading = robotOrientation.getYaw(AngleUnit.DEGREES);
+            telemetry.addData("Yaw (Z)", "%.2f Deg. (Heading)", robotOrientation.getYaw(AngleUnit.DEGREES));
+
+            double error = returnHeadingDeg - heading;
+
+            // Normalize to -180 to +180
+            if (error > 180) error -= 360;
+            if (error < -180) error += 360;
+
+            double power = kP_turn * error;
+            power = Math.max(Math.min(power, 0.5), -0.5);
+
+            // Turn: left motors forward, right motors backward
+            fLeft.setPower(power);
+            bLeft.setPower(power);
+            fRight.setPower(-power);
+            bRight.setPower(-power);
+
+            telemetry.addData("Turning Error (deg)", error);
+            telemetry.addData("Turn Power", power);
+            telemetry.addData("Current Heading", heading);
+            telemetry.update();
+
+            if (Math.abs(error) < 1) { // within 1 degree
+                zero = false;
+            }
+        } //zero
+
+
+//OFF TAPE
+
+        boolean back = true;
+
+
+
+        while (opModeIsActive() && back) {
+            double avgTicks = (fLeft.getCurrentPosition() + fRight.getCurrentPosition()
+                    + bLeft.getCurrentPosition() + bRight.getCurrentPosition()) / 4.0;
+
+            double error = backTargetTicks - avgTicks;
+            double power = kP_drive * error;
+
+            // Clamp power to avoid too fast
+            power = Math.max(Math.min(power, 0.6), -0.6);
+
+            // Set motors
+            fLeft.setPower(power);
+            fRight.setPower(power);
+            bLeft.setPower(power);
+            bRight.setPower(power);
+
+            telemetry.addData("Driving Error (ticks)", error);
+            telemetry.addData("Motor Power", power);
+            telemetry.update();
+
+            if (Math.abs(error) < 5) { // within ~0.5 cm if TICKS_PER_REV and wheel size match
+                back = false;
+            }
+        } //back
+
+        setAllMotors(0);
+        sleep(500);
+
+
+    } //runOpMode
+} //linearOpMode
